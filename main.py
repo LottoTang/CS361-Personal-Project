@@ -9,7 +9,11 @@ Description: "main.py" provides a graphical user-interface (GUI) for EZChat
 from tkinter import *
 from tkinter.font import Font
 from tkinter import ttk
-import Pmw
+
+import Pmw # pip install Pmw
+import time
+import heapq
+import os
 
 # Window asking confirmation for entering the Advanced Mode
 def alert_advanced():
@@ -36,7 +40,6 @@ def alert_advanced():
     alert2 = Button(alert_window, text="No", command=alert_window.destroy,
                     padx=40, pady=10, font=button_text)
     alert2.pack(side=RIGHT, padx=35)
-
 
 # Window to choose User1 or User2 (for Advanced Mode)
 def choose_user(mode):
@@ -75,6 +78,69 @@ def choose_user(mode):
     user2.pack(pady=5)
 
 
+# Write the encryption instruction to external text
+def activate_encryption():
+    with open("encrypt-instructions.txt", "r+") as file:
+        file.seek(0)
+        file.truncate()
+        file.write("encrypt")
+
+
+# Write the decryption instruction to external text
+def activate_decryption():
+    with open("encrypt-instructions.txt", "r+") as file:
+        file.seek(0)
+        file.truncate()
+        file.write("decrypt")
+
+
+# Write the valid message to external file (for encryption)
+def write_encryption(text):
+    with open("encrypted-message-holder.txt", "r+") as message_file:
+        message_file.seek(0)
+        message_file.truncate()
+        message_file.write(text)
+
+# Read the encrypted text from external file
+def read_encrypted():
+    with open("encrypted-message-holder.txt", "r") as message_file:
+        return message_file.readline()
+
+# Check the length of the outgoing text (in characters) and activate the encryption/decryption process
+def check_text(text, msg_queue, user_number):
+    global msgID_counter
+    text_length = len(text)
+    valid = True
+    # if valid, write to the encrypted-message-holder.txt
+    if text_length > 0 and text_length <= 1000:
+        # accept only characters within ascii 32 - 126 (inclusive)
+        for i in range(text_length):
+            if ord(text[i]) < 32 or ord(text[i]) > 126:
+                valid = False
+            if not valid:
+                print('Invalid characters spotted!')
+                break
+    # number of characters out of range
+    else:
+        print("Maximum characters exceeded per single transmission!")
+        valid = False
+    
+    if valid:
+        write_encryption(text)
+        activate_encryption()
+        time.sleep(1)
+        encrypted_text = read_encrypted()
+        activate_decryption()
+        heapq.heappush(msg_queue, (f"{time.time()}-/xseparator{time.strftime('%m-%d %H:%M',time.localtime())}-/xseparator{user_number}-/xseparator{text}-/xseparator{encrypted_text}-/xseparator{msgID_counter}"))
+        save_chat(msg_queue)
+        msgID_counter += 1
+
+# Save the messages into external file for record
+def save_chat(msg_queue):
+    with open("message_record.txt", "a") as record_file:
+        msg = heapq.heappop(msg_queue)
+        record_file.write(f'{msg}\n')
+
 # Window for Chatbox (Advanced Version)
 def chatbox_advanced(user_number):
     
@@ -101,7 +167,7 @@ def chatbox_advanced(user_number):
     header_canvas.grid(row=0, column=0, sticky=EW)
 
     chatbox_window.grid_columnconfigure(0, weight=1)
-    header_canvas.grid_columnconfigure((0, 2), minsize=200)
+    header_canvas.grid_columnconfigure((0, 5), minsize=150)
 
     back_button = Button(header_canvas, text="Return", font=normal_text,
                          command=chatbox_window.destroy)
@@ -119,7 +185,7 @@ def chatbox_advanced(user_number):
 
     chatbox_canvas = Canvas(chatbox_frame, background="#9DB2BF", width=600, 
                             height=330, highlightthickness=0,
-                            scrollregion=(0, 0, 800, 800))
+                            scrollregion=(0, 0, 800, 3000))
     chatbox_canvas.grid(row=0, column=1)
 
     vbar = Scrollbar(chatbox_frame, orient="vertical")
@@ -128,10 +194,6 @@ def chatbox_advanced(user_number):
 
     chatbox_canvas.config(width=600, height=330)
     chatbox_canvas.config(yscrollcommand=vbar.set)
-
-    # Messages (will be appended using function later)
-    msg1 = chatbox_canvas.create_text(10, 20, anchor="w", text="User1: Hello User2, I am using EZChat!")
-    msg2 = chatbox_canvas.create_text(575, 40, anchor="e", text="User2: Hey! Nice to meet you!")
     
     # For placeholder
     def click(event):
@@ -150,8 +212,83 @@ def chatbox_advanced(user_number):
     input_text.bind("<Button-1>", click)
     input_text.grid(row=1, column=0, padx=20, ipadx=170, ipady=10)
 
+    # Display messages on the screen
+    def display_message(msg_positionY):
+        with open("message_record.txt", "r") as record_file:
+            for line in record_file:
+                extracted_msg = line.split('-/xseparator')
+                if (user_number == 1 and extracted_msg[2] == "1") or (user_number == 2 and extracted_msg[2] == "2"):
+                    msg_positionX = 10
+                    anchor = "w"
+                else:
+                    msg_positionX = 575
+                    anchor = "e"
+                msg = chatbox_canvas.create_text(msg_positionX, msg_positionY, anchor=anchor, text=f"User{extracted_msg[2]}: {extracted_msg[3]}", font=message_text)  
+                msg_positionY += 20 
+                msg = chatbox_canvas.create_text(msg_positionX, msg_positionY, anchor=anchor, text=extracted_msg[1])    
+                msg_positionY += 20
+
+    display_message(msg_positionY)
+
+    refresh_button = Button(header_canvas, text="Refresh", font=normal_text,
+                         command=lambda: display_message(msg_positionY))
+    refresh_button.grid(row=0, column=1, pady=15, sticky=E)
+    refresh_tooltip = Pmw.Balloon(chatbox_window)
+    refresh_tooltip.bind(refresh_button, 'Click to refresh messages.')
+
+     # Clear the chat messages
+    def clear_chat(alert_window):
+        alert_window.destroy()
+        with open("message_record.txt", "r+") as record_file:
+            record_file.seek(0)
+            record_file.truncate()
+            chatbox_window.destroy()
+
+    # Window asking confirmation for clearing all the messages
+    def alert_clearMsg():
+    
+        alert_window = Toplevel()
+        alert_window.title('ALERT')
+        alert_window.resizable(0, 0)
+        
+        # Size of the Choose User Window
+        alert_window_width = 400
+        alert_window_height = 250
+        position_x = (screen_width/2) - (alert_window_width/2)
+        position_y = (screen_height/2) - (alert_window_height/2)
+        alert_window.geometry(f'{alert_window_width}x{alert_window_height}+{int(position_x)}+{int(position_y)}')
+        
+        # Content of the Choose User Window
+        message1 = "ALERT\n\nAll messages will be cleared with no recovery!\n\nPlease confirm:"
+        alert_label = Label(alert_window, text=message1, font=normal_text, fg='red')
+        alert_label.pack(pady=5)
+
+        alert1 = Button(alert_window, text="Yes", command=lambda:clear_chat(alert_window),
+                        padx=40, pady=10, font=button_text)
+        alert1.pack(side=LEFT, padx=35)
+        alert2 = Button(alert_window, text="No", command=alert_window.destroy,
+                        padx=40, pady=10, font=button_text)
+        alert2.pack(side=RIGHT, padx=35)
+
+    clear_button = Button(header_canvas, text="Clear Chat", font=normal_text,
+                         command=alert_clearMsg)
+    clear_button.grid(row=0, column=2, padx=150, pady=15, sticky=W)
+    clear_tooltip = Pmw.Balloon(chatbox_window)
+    clear_tooltip.bind(clear_button, 'Click to clear all messages.')
+
+    # extract the entry text
+    def send_msg():
+        msg = input_text.get()
+        if msg:
+            check_text(msg, msg_queue, user_number)
+            input_text.delete(0, END)
+            display_message(msg_positionY)
+            insert_encrypted()
+        else:
+            return
+
     send_button = Button(input_frame, text="Send", font=normal_text,
-                         command=chatbox_window.destroy)
+                         command=send_msg)
     send_button.grid(row=1, column=1, padx=15, pady=10, sticky=W)
 
     send_tooltip = Pmw.Balloon(chatbox_window)
@@ -177,23 +314,28 @@ def chatbox_advanced(user_number):
     tree.heading("#0", text="MessageID")
     tree.heading("#1", text="Encrypted Text")
 
-    # Encrypted messages (will be appended using function later)
-    tree.insert('', 'end', text="1", values=('asdadawdarw='))
-    tree.insert('', 'end', text="2", values=('asdadawdarw='))
-    tree.insert('', 'end', text="3", values=('asdadawdarw='))
-    tree.insert('', 'end', text="4", values=('asdadawdarw='))
-    tree.insert('', 'end', text="5", values=('asdadawdarw='))
-    tree.insert('', 'end', text="6", values=('asdadawdarw='))
-    tree.insert('', 'end', text="7", values=('asdadawdarw='))
-    tree.insert('', 'end', text="8", values=('asdadawdarw='))
-    tree.insert('', 'end', text="9", values=('asdadawdarw='))
-    tree.insert('', 'end', text="7", values=('asdadawdarw='))
-    tree.insert('', 'end', text="8", values=('asdadawdarw='))
-    tree.insert('', 'end', text="9", values=('asdadawdarw='))
+    # Display all encrypted messages when new window is opened
+    def display_encrypted():
+        with open("message_record.txt", "r") as record_file:
+            for line in record_file:
+                extracted_msg = line.split('-/xseparator')
+                tree.insert('', 'end', text=extracted_msg[5], values=(extracted_msg[4]))
+
+    # Display all encrypted messages when new window is opened
+    def insert_encrypted():
+        with open("message_record.txt", "r") as record_file:
+            last_line = record_file.readlines()[-1]
+            extracted_msg = last_line.split('-/xseparator')
+            tree.insert('', 'end', text=extracted_msg[5], values=(extracted_msg[4]))
+
+    # Display the previous messages first
+    display_message(msg_positionY)
+    display_encrypted()
 
     yscrollbar.configure(command=tree.yview)
     yscrollbar.grid(row=0, column=1, sticky=NS)
-    
+
+
 
 # Window for Chatbox (Simplified Version)
 def chatbox_simplified(user_number):
@@ -222,11 +364,11 @@ def chatbox_simplified(user_number):
     header_canvas.grid(row=0, column=0, sticky=EW)
 
     chatbox_window.grid_columnconfigure(0, weight=1)
-    header_canvas.grid_columnconfigure((0,2), minsize=200)
+    header_canvas.grid_columnconfigure((0, 5), minsize=150)
 
     back_button = Button(header_canvas, text="Return", font=normal_text,
                          command=chatbox_window.destroy)
-    back_button.grid(row=0, column=0, pady=15)
+    back_button.grid(row=0, column=0, padx=10, pady=15, sticky=E)
     back_tooltip = Pmw.Balloon(chatbox_window)
     back_tooltip.bind(back_button, 'Click to return to mainpage.')
 
@@ -239,7 +381,7 @@ def chatbox_simplified(user_number):
 
     chatbox_canvas = Canvas(chatbox_frame, background="#9DB2BF", width=600,
                             height=565, highlightthickness=0,
-                            scrollregion=(0, 0, 800, 800))
+                            scrollregion=(0, 0, 800, 3000))
     chatbox_canvas.grid(row=0, column=1)
 
     vbar = Scrollbar(chatbox_frame, orient="vertical")
@@ -248,10 +390,6 @@ def chatbox_simplified(user_number):
 
     chatbox_canvas.config(width=600, height=565)
     chatbox_canvas.config(yscrollcommand=vbar.set)
-
-    # Messages (will be appended using function later)
-    msg1 = chatbox_canvas.create_text(10, 20, anchor="w", text="User1: Hello User2, I am using EZChat!")
-    msg2 = chatbox_canvas.create_text(575, 40, anchor="e", text="User2: Hey! Nice to meet you!")
 
     # For placeholder
     def click(event):
@@ -270,12 +408,87 @@ def chatbox_simplified(user_number):
     input_text.bind("<Button-1>", click)
     input_text.grid(row=0, column=0, padx=20, ipadx=170, ipady=10)
 
+    # Display messages on the screen
+    def display_message(msg_positionY):
+        with open("message_record.txt", "r") as record_file:
+            for line in record_file:
+                extracted_msg = line.split('-/xseparator')
+                if (user_number == 1 and extracted_msg[2] == "1") or (user_number == 2 and extracted_msg[2] == "2"):
+                    msg_positionX = 10
+                    anchor = "w"
+                else:
+                    msg_positionX = 575
+                    anchor = "e"
+                msg = chatbox_canvas.create_text(msg_positionX, msg_positionY, anchor=anchor, text=f"User{extracted_msg[2]}: {extracted_msg[3]}", font=message_text)  
+                msg_positionY += 20 
+                msg = chatbox_canvas.create_text(msg_positionX, msg_positionY, anchor=anchor, text=extracted_msg[1])    
+                msg_positionY += 20
+    
+    display_message(msg_positionY)
+
+    refresh_button = Button(header_canvas, text="Refresh", font=normal_text,
+                         command=lambda: display_message(msg_positionY))
+    refresh_button.grid(row=0, column=1, pady=15, sticky=E)
+    refresh_tooltip = Pmw.Balloon(chatbox_window)
+    refresh_tooltip.bind(refresh_button, 'Click to refresh messages.')
+
+    # Clear the chat messages
+    def clear_chat(alert_window):
+        alert_window.destroy()
+        with open("message_record.txt", "r+") as record_file:
+            record_file.seek(0)
+            record_file.truncate()
+            chatbox_window.destroy()
+
+    # Window asking confirmation for clearing all the messages
+    def alert_clearMsg():
+    
+        alert_window = Toplevel()
+        alert_window.title('ALERT')
+        alert_window.resizable(0, 0)
+        
+        # Size of the Choose User Window
+        alert_window_width = 400
+        alert_window_height = 250
+        position_x = (screen_width/2) - (alert_window_width/2)
+        position_y = (screen_height/2) - (alert_window_height/2)
+        alert_window.geometry(f'{alert_window_width}x{alert_window_height}+{int(position_x)}+{int(position_y)}')
+        
+        # Content of the Choose User Window
+        message1 = "ALERT\n\nAll messages will be cleared with no recovery!\n\nPlease confirm:"
+        alert_label = Label(alert_window, text=message1, font=normal_text, fg='red')
+        alert_label.pack(pady=5)
+
+        alert1 = Button(alert_window, text="Yes", command=lambda:clear_chat(alert_window),
+                        padx=40, pady=10, font=button_text)
+        alert1.pack(side=LEFT, padx=35)
+        alert2 = Button(alert_window, text="No", command=alert_window.destroy,
+                        padx=40, pady=10, font=button_text)
+        alert2.pack(side=RIGHT, padx=35)
+
+    clear_button = Button(header_canvas, text="Clear Chat", font=normal_text,
+                         command=alert_clearMsg)
+    clear_button.grid(row=0, column=2, padx=150, pady=15, sticky=W)
+    clear_tooltip = Pmw.Balloon(chatbox_window)
+    clear_tooltip.bind(clear_button, 'Click to clear all messages.')
+    
+    # extract the entry text
+    def send_msg():
+        msg = input_text.get()
+        if msg:
+            check_text(msg, msg_queue, user_number)
+            input_text.delete(0, END)
+            display_message(msg_positionY)
+        else:
+            return
+
     send_button = Button(input_frame, text="Send", font=normal_text,
-                         command=chatbox_window.destroy)
+                         command=send_msg)
     send_button.grid(row=0, column=1, padx=15, pady=10, sticky=W)
 
     send_tooltip = Pmw.Balloon(chatbox_window)
     send_tooltip.bind(send_button, 'Click to send the message.')
+
 
 # Setting up the GUI
 root = Tk()
@@ -316,6 +529,11 @@ button_text = Font(
     family="Segoe UI",
     size=16,
     weight="bold"
+)
+
+message_text = Font(
+    family="Segoe UI",
+    size=12
 )
 
 style = ttk.Style(root)
@@ -381,5 +599,13 @@ advanced_button.grid(row=11, column=2, pady=10)
 
 advanced_tooltip = Pmw.Balloon(root)
 advanced_tooltip.bind(advanced_button, 'Suitable for advanced users only.')
+
+# Message variable
+msg_queue = []
+msg_positionY = 20
+global msgID_counter
+msgID_counter = 1
+global msgID_queue
+msgID_queue = []
 
 mainloop()
